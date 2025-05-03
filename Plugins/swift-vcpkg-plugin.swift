@@ -49,8 +49,10 @@ func vcpkgInstall(vcpkgToolPath: URL, manifestRoot: URL, installRoot: URL?, trip
     let vcpkgInstallRoot = installRoot ?? guessVcpkgRoot()
     let vcpkgOutput = vcpkgInstallRoot.appending(path: "vcpkg/info")
     var args: [String] = ["install", // vcpkg help install
-                          "--x-manifest-root", manifestRoot.absoluteString, //
-                          "--x-install-root", vcpkgInstallRoot.absoluteString]
+                          "--no-print-usage",
+                          "--recurse",
+                          "--x-manifest-root", manifestRoot.path, //
+                          "--x-install-root", vcpkgInstallRoot.path]
     if triplet != nil {
         args.append("--triplet")
         args.append(triplet!)
@@ -72,7 +74,7 @@ struct swift_vcpkg_plugin: BuildToolPlugin {
         let vcpkgOutput = workspace.appending(path: "vcpkg/info")
         let vcpkgTool = try context.tool(named: "vcpkg")
         return [
-            vcpkgVersionCheck(vcpkgToolPath: vcpkgTool.url),
+            // vcpkgVersionCheck(vcpkgToolPath: vcpkgTool.url),
             vcpkgInstall(vcpkgToolPath: vcpkgTool.url, manifestRoot: workspace, installRoot: vcpkgOutput)
         ]
     }
@@ -87,7 +89,7 @@ struct swift_vcpkg_plugin: BuildToolPlugin {
             let workspace = context.xcodeProject.directoryURL
             let vcpkgTool = try context.tool(named: "vcpkg")
             return [
-                vcpkgVersionCheck(vcpkgToolPath: vcpkgTool.url),
+                // vcpkgVersionCheck(vcpkgToolPath: vcpkgTool.url),
                 vcpkgInstall(vcpkgToolPath: vcpkgTool.url, manifestRoot: workspace, installRoot: workspace)
             ]
         }

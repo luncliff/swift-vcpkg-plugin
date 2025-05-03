@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "swift-vcpkg-plugin",
+  "version-date": "2025-05-04",
+  "description": "...",
+  "homepage": "https://github.com/luncliff/swift-vcpkg-plugin",
+  "dependencies": [
+    {
+      "name": "vcpkg-get-python-packages",
+      "host": true
+    }
+  ]
+}

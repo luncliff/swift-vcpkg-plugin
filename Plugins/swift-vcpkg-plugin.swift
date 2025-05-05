@@ -124,6 +124,7 @@ struct swift_vcpkg_plugin: BuildToolPlugin {
     }
 
     /// Entry point for creating build commands for targets in Swift packages.
+    /// @todo: reduce work time when caches are ready. currently, we consider it's a clean build
     func createBuildCommands(context: PluginContext, target _: Target) throws -> [Command] {
         let curl = try findProgram(context: context, name: "curl")
         let unzip = try findProgram(context: context, name: "unzip")

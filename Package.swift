@@ -18,14 +18,12 @@ let dependencies: [Package.Dependency] = [
 let targets: [Target] = [
     .plugin(
         name: name,
-        capability: .buildTool()
+        capability: .buildTool(),
+        packageAccess: true
     ),
     .testTarget(
         name: "\(name)Tests",
         path: "Tests",
-        swiftSettings: [
-            .interoperabilityMode(.Cxx)
-        ],
         linkerSettings: [
             .linkedFramework("Foundation"),
             .linkedFramework("XCTest")

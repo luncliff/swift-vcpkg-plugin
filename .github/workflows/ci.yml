@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: "Build and Test"
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.0'
+
+    - name: "Run swift(build)"
+      run: |
+        swift package resolve
+        swift build --build-tests --verbose
+
+    - name: "Run swift(test)"
+      if: ${{ github.event_name == 'push' }}
+      run: |
+        swift test --enable-code-coverage --verbose
+
+    - name: "Run xcodebuild(test)"
+      # if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ false }}
+      id: xcodebuild-test
+      run: |
+        xcodebuild -scheme swift-vcpkg-plugin-Package -destination "name=My Mac" \
+          -derivedDataPath DerivedData \
+          -resultBundlePath DerivedData/swift-vcpkg-plugin.xcresult \
+          -enableCodeCoverage YES \
+          SWIFT_VERSION=6.0 \
+          test
+
+    - uses: kishikawakatsumi/xcresulttool@v1.7.1
+      if: steps.xcodebuild-test.outcome != 'skipped'
+      continue-on-error: true
+      with:
+        path: DerivedData/swift-vcpkg-plugin.xcresult

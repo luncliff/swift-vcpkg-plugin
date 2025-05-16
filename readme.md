@@ -68,7 +68,7 @@ swift test
 
 ### Format/Lint
 
-Install the tools with [Homebrew](https://brew.sh)
+Install some tools with [Homebrew](https://brew.sh)
 
 * https://formulae.brew.sh/formula/swiftformat
 * https://formulae.brew.sh/formula/swiftlint

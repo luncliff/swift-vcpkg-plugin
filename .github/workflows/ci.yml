@@ -27,13 +27,15 @@ jobs:
         swift test --enable-code-coverage --verbose
 
     - name: "Run xcodebuild(test)"
-      if: ${{ github.event_name == 'pull_request' }}
+      # if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ false }}
       id: xcodebuild-test
       run: |
         xcodebuild -scheme swift-vcpkg-plugin-Package -destination "name=My Mac" \
           -derivedDataPath DerivedData \
           -resultBundlePath DerivedData/swift-vcpkg-plugin.xcresult \
           -enableCodeCoverage YES \
+          SWIFT_VERSION=6.0 \
           test
 
     - uses: kishikawakatsumi/xcresulttool@v1.7.1

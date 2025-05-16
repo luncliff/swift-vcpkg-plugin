@@ -2,99 +2,6 @@
 import Foundation
 import PackagePlugin
 
-class CommandBuilder {
-    let workspace: URL
-
-    init(workspace: URL) {
-        self.workspace = workspace
-    }
-
-    func makeRegistryURL(tag: String) -> URL {
-        URL(string: "https://github.com/microsoft/vcpkg/archive/refs/tags/\(tag).zip")!
-    }
-
-    func makeToolURL(tag: String) -> URL {
-        URL(string: "https://github.com/microsoft/vcpkg-tool/releases/download/\(tag)/vcpkg-macos")!
-    }
-
-    func buildExtract(unzip: URL, zipFile: URL, destination: URL) -> Command {
-        .prebuildCommand(
-            displayName: "Run: unzip \(zipFile)",
-            executable: unzip,
-            arguments: ["-o", zipFile.path, "-d", destination.path],
-            environment: ProcessInfo.processInfo.environment,
-            outputFilesDirectory: destination
-        )
-    }
-
-    func buildDownload(curl: URL, source: URL, destination: URL) -> Command {
-        .prebuildCommand(
-            displayName: "Run: curl \(source)",
-            executable: curl,
-            arguments: ["-L", source.absoluteString, "--output", destination.path],
-            environment: ProcessInfo.processInfo.environment,
-            outputFilesDirectory: destination
-        )
-    }
-
-    func buildVersionCheck(vcpkgToolPath: URL) -> Command {
-        .prebuildCommand(
-            displayName: "Run: vcpkg version",
-            executable: vcpkgToolPath,
-            arguments: ["--version"],
-            environment: ProcessInfo.processInfo.environment,
-            outputFilesDirectory: workspace
-        )
-    }
-
-    func buildInstall(vcpkgToolPath: URL, vcpkgRoot: URL, manifestRoot: URL, installRoot: URL, triplet: String? = nil) -> Command {
-        var args: [String] = ["install", // vcpkg help install
-                              "--no-print-usage",
-                              "--recurse",
-                              "--clean-after-build", // remove files not to disturb plugin caching
-                              "--vcpkg-root", vcpkgRoot.path, //
-                              "--x-manifest-root", manifestRoot.path, //
-                              "--x-install-root", installRoot.path]
-        if triplet != nil {
-            args.append("--triplet")
-            args.append(triplet!)
-        }
-        var env = ProcessInfo.processInfo.environment
-        env.removeValue(forKey: "VCPKG_ROOT")
-        return .prebuildCommand(
-            displayName: "Run: vcpkg install",
-            executable: vcpkgToolPath,
-            arguments: args,
-            environment: env,
-            outputFilesDirectory: installRoot
-        )
-    }
-
-    func buildChangeFileMode(chmod: URL, target: URL, mode: String) -> Command {
-        .prebuildCommand(
-            displayName: "Run: chmod",
-            executable: chmod,
-            arguments: [mode, target.path],
-            environment: ProcessInfo.processInfo.environment,
-            outputFilesDirectory: target.deletingLastPathComponent()
-        )
-    }
-
-    func buildClean(remove: URL, targets: [URL]) -> Command {
-        var args: [String] = ["-f", "-R"] // remove recursively
-        for t in targets {
-            args.append(t.path)
-        }
-        return .prebuildCommand(
-            displayName: "Run: rm \(targets.count) items",
-            executable: remove,
-            arguments: args,
-            environment: ProcessInfo.processInfo.environment,
-            outputFilesDirectory: workspace
-        )
-    }
-}
-
 let defaultRegistryVersion = "2025.04.09"
 let defaultToolVersion = "2025-04-16"
 
@@ -111,18 +18,19 @@ func findProgramInSystem(name: String) -> URL? {
     return nil
 }
 
+/// Search the executable in the context and system
+func findProgram(context: PluginContext, name: String) throws -> URL {
+    do {
+        let program = try context.tool(named: name)
+        return program.url
+    } catch {
+        // if we can't find the tool, can't advance. throw another error
+        return findProgramInSystem(name: name)!
+    }
+}
+
 @main
 struct swift_vcpkg_plugin: BuildToolPlugin {
-    /// Search the executable in the context and system
-    func findProgram(context: PluginContext, name: String) throws -> URL {
-        do {
-            let program = try context.tool(named: name)
-            return program.url
-        } catch {
-            return findProgramInSystem(name: name)!
-        }
-    }
-
     /// Entry point for creating build commands for targets in Swift packages.
     /// @todo: reduce work time when caches are ready. currently, we consider it's a clean build
     func createBuildCommands(context: PluginContext, target _: Target) throws -> [Command] {
@@ -139,34 +47,47 @@ struct swift_vcpkg_plugin: BuildToolPlugin {
         let vcpkgRoot = context.pluginWorkDirectoryURL.appending(path: vcpkgFolderName)
         let vcpkgToolPath: URL = vcpkgRoot.appending(path: "vcpkg")
         let vcpkgInstallRoot = context.package.directoryURL.appending(path: ".build/artifacts")
-        return [
-            builder.buildDownload(curl: curl, source: registrySource, destination: registryZipFile),
-            builder.buildExtract(unzip: unzip, zipFile: registryZipFile, destination: context.pluginWorkDirectoryURL),
-            builder.buildDownload(curl: curl, source: toolSource, destination: vcpkgToolPath),
+
+        var commands: [Command] = []
+        let fm = FileManager.default
+        // if the vcpkg folder doesn't exist, download and extract it
+        if !fm.fileExists(atPath: vcpkgRoot.path) {
+            commands.append(builder.buildDownload(curl: curl, source: registrySource, destination: registryZipFile))
+            commands.append(builder.buildExtract(unzip: unzip, zipFile: registryZipFile, destination: context.pluginWorkDirectoryURL))
+        }
+        // if the vcpkg tool doesn't exist, download it
+        if !fm.fileExists(atPath: vcpkgToolPath.path) {
+            commands.append(builder.buildDownload(curl: curl, source: toolSource, destination: vcpkgToolPath))
+        }
+        commands.append(contentsOf: [
+            // vcpkg tool is not executable. we need to change the file mode
             builder.buildChangeFileMode(chmod: chmod, target: vcpkgToolPath, mode: "+x"),
+            // run several commands. check the version for build log, and run install command
             builder.buildVersionCheck(vcpkgToolPath: vcpkgToolPath),
             builder.buildInstall(vcpkgToolPath: vcpkgToolPath, vcpkgRoot: vcpkgRoot, manifestRoot: context.package.directoryURL, installRoot: vcpkgInstallRoot),
             // note: for some reason --x--x--x causes plugin cache generation error
             // TODO: need more investigation for the error messages
             builder.buildChangeFileMode(chmod: chmod, target: vcpkgToolPath, mode: "-x")
-        ]
+        ])
+        return commands
     }
 }
 
 #if canImport(XcodeProjectPlugin)
     import XcodeProjectPlugin
 
-    extension swift_vcpkg_plugin: XcodeBuildToolPlugin {
-        /// Search the executable in the context and system
-        func findProgram(context: XcodePluginContext, name: String) throws -> URL {
-            do {
-                let program = try context.tool(named: name)
-                return program.url
-            } catch {
-                return findProgramInSystem(name: name)!
-            }
+    /// Search the executable in the context and system
+    func findProgram(context: XcodePluginContext, name: String) throws -> URL {
+        do {
+            let program = try context.tool(named: name)
+            return program.url
+        } catch {
+            // if we can't find the tool, can't advance. throw another error
+            return findProgramInSystem(name: name)!
         }
+    }
 
+    extension swift_vcpkg_plugin: XcodeBuildToolPlugin {
         /// Entry point for creating build commands for targets in Xcode projects.
         func createBuildCommands(context: XcodePluginContext, target _: XcodeTarget) throws -> [Command] {
             let curl = try findProgram(context: context, name: "curl")
@@ -182,15 +103,24 @@ struct swift_vcpkg_plugin: BuildToolPlugin {
             let vcpkgRoot = context.pluginWorkDirectoryURL.appending(path: vcpkgFolderName)
             let vcpkgToolPath: URL = vcpkgRoot.appending(path: "vcpkg")
             let vcpkgInstallRoot = context.xcodeProject.directoryURL.appending(path: ".build/artifacts")
-            return [
-                builder.buildDownload(curl: curl, source: registrySource, destination: registryZipFile),
-                builder.buildExtract(unzip: unzip, zipFile: registryZipFile, destination: context.pluginWorkDirectoryURL),
-                builder.buildDownload(curl: curl, source: toolSource, destination: vcpkgToolPath),
+
+            // same step with the createBuildCommands above
+            var commands: [Command] = []
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: vcpkgRoot.path) {
+                commands.append(builder.buildDownload(curl: curl, source: registrySource, destination: registryZipFile))
+                commands.append(builder.buildExtract(unzip: unzip, zipFile: registryZipFile, destination: context.pluginWorkDirectoryURL))
+            }
+            if !fm.fileExists(atPath: vcpkgToolPath.path) {
+                commands.append(builder.buildDownload(curl: curl, source: toolSource, destination: vcpkgToolPath))
+            }
+            commands.append(contentsOf: [
                 builder.buildChangeFileMode(chmod: chmod, target: vcpkgToolPath, mode: "+x"),
                 builder.buildVersionCheck(vcpkgToolPath: vcpkgToolPath),
                 builder.buildInstall(vcpkgToolPath: vcpkgToolPath, vcpkgRoot: vcpkgRoot, manifestRoot: context.xcodeProject.directoryURL, installRoot: vcpkgInstallRoot),
                 builder.buildChangeFileMode(chmod: chmod, target: vcpkgToolPath, mode: "-x")
-            ]
+            ])
+            return commands
         }
     }
 #endif
